@@ -1,0 +1,28 @@
+[package]
+name = "wasm-oci-serve"
+version = "0.1.0"
+edition = "2021"
+description = "CLI tool for serving WASM components via OCI registry protocol"
+
+[dependencies]
+# WASM parsing and metadata
+wasm-metadata = "0.244"
+wit-component = "0.244"
+
+# HTTP server
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+
+# Serialization and hashing
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Utilities
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -1,0 +1,23 @@
+{
+  "annotations": {
+    "org.opencontainers.image.description": "A WASI API for sending and receiving HTTP requests and responses.",
+    "org.opencontainers.image.licenses": "Apache-2.0 WITH LLVM-exception",
+    "org.opencontainers.image.source": "https://github.com/webassembly/wasi",
+    "org.opencontainers.image.url": "https://wasi.dev",
+    "org.opencontainers.image.version": "0.2.1"
+  },
+  "config": {
+    "digest": "sha256:c2b2947c47087311438f42ea6d3459a7deee1c754a54cd6df2a2e9296cd13157",
+    "mediaType": "application/vnd.wasm.config.v0+json",
+    "size": 376
+  },
+  "layers": [
+    {
+      "digest": "sha256:a2e003de97f144467a05a545d376207267e82abb18741505a6b87aa40f4b33db",
+      "mediaType": "application/wasm",
+      "size": 50856
+    }
+  ],
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "schemaVersion": 2
+}
