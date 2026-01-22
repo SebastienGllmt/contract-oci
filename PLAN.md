@@ -135,9 +135,11 @@ These endpoints are required for `oras pull` to work (the **Pull** workflow cate
 | end-9 | `DELETE` | `/v2/<name>/manifests/<reference>` | Delete manifest or tag |
 | end-10 | `DELETE` | `/v2/<name>/blobs/<digest>` | Delete blob |
 
-### Not Implemented - Referrers API
+### TBD - Referrers API
 
-**Reason**: The referrers API (added in distribution-spec 1.1) is for tracking relationships between manifests (e.g., SBOMs, signatures attached to images). Not needed for basic WASM component serving.
+**Reason**: The referrers API (added in distribution-spec 1.1) is for tracking relationships between manifests (e.g., SBOMs, signatures attached to images).
+
+It may be used to aggregate components by the same author, or to track frontends associated to dApps.
 
 | ID | Method | Endpoint | Description |
 |----|--------|----------|-------------|
