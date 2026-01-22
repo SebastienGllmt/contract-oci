@@ -349,12 +349,12 @@ curl http://localhost:5000/v2/namespace/name/tags/list
 
 **Problem**: The OCI Distribution Spec is generic. We implemented the standard pull endpoints, but unclear if:
 - Some endpoints are irrelevant for WASM components specifically
-- There are WASM-specific extensions we should support (e.g., from `warg` or other WASM registries)
+- There are WASM-specific extensions we should support (note: this is NOT related to `warg), but rather in relation to [Wasm OCI Artifact Layout](https://tag-runtime.cncf.io/wgs/wasm/deliverables/wasm-oci-artifact/)
 
 **Tasks**:
-- [ ] Research how `warg` (WebAssembly Registry) extends OCI (or does it even extend OCI? `warg` may be a deprecated tool, replaced by the OCI Registry option)
 - [ ] Check if `wasm-pkg-tools` uses any non-standard endpoints
 - [ ] Document which endpoints are WASM-relevant vs container-image-specific
+- [ ] Compare our implementation to [Wasm OCI Artifact Layout](https://tag-runtime.cncf.io/wgs/wasm/deliverables/wasm-oci-artifact/)
 
 ### 9.3 Frontend Component Association
 
