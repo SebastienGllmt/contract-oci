@@ -108,7 +108,6 @@ These endpoints are required for `oras pull` to work (the **Pull** workflow cate
 | end-1 | `GET` | `/v2/` | Version check | **Implemented** |
 | end-2 | `GET`/`HEAD` | `/v2/<name>/blobs/<digest>` | Pull blob | **Implemented** |
 | end-3 | `GET`/`HEAD` | `/v2/<name>/manifests/<reference>` | Pull manifest | **Implemented** |
-| end-8a | `GET` | `/v2/<name>/tags/list` | List tags | **Implemented** |
 
 ### Not Implemented - Push Endpoints
 
@@ -142,13 +141,14 @@ These endpoints are required for `oras pull` to work (the **Pull** workflow cate
 | end-12a | `GET` | `/v2/<name>/referrers/<digest>` | List referrers |
 | end-12b | `GET` | `/v2/<name>/referrers/<digest>?artifactType=<type>` | List referrers with filter |
 
-### Not Implemented - Pagination
+### Partially Implemented - Tag listing
 
-**Reason**: Pagination by name is unimplementable in a blockchain setting as-is, as there is no guarantee all projects with a name come from the same person (they must be filtered by the signing key).
+**Reason**: Tags are unimplementable in a blockchain setting as-is, as there is no guarantee all projects with a name come from the same person (they must be filtered by the signing key). Therefore, the only "tag" in the version number sense is `1.0.0`, adn there will never be multiple tags per project.
 
 | ID | Method | Endpoint | Description |
 |----|--------|----------|-------------|
 | end-8b | `GET` | `/v2/<name>/tags/list?n=<int>&last=<tagname>` | Paginated tag listing |
+| end-8a | `GET` | `/v2/<name>/tags/list` | List tags |
 
 ### URL Mapping
 
@@ -333,10 +333,13 @@ curl http://localhost:5000/v2/namespace/name/tags/list
 
 **Problem**: In `create_router`, we hard-code route strings manually. This is error-prone and could lead to typos or missing endpoints.
 
-**Potential solutions**:
-- [ ] Generate routes from an OpenAPI spec
-- [ ] Use constants derived from the distribution-spec
-- [ ] Create a macro that validates routes against the spec
+**Solution implemented**: Created `src/routes.rs` module with:
+- [x] Route constants derived from the distribution-spec (`endpoints` module)
+- [x] Validation patterns from the spec (`patterns` module)
+- [x] Error code constants (`error_codes` module)
+- [x] Header constants (`headers` module)
+- [x] Tests to validate routes match the spec format
+- [x] Updated `server.rs` to use these constants
 
 ### 9.2 WASM-Specific OCI Extensions
 
