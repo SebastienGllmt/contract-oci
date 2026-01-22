@@ -5,3 +5,4 @@
 pub mod oci;
 pub mod registry;
 pub mod server;
+pub mod routes;
