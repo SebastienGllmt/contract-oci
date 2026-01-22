@@ -360,15 +360,301 @@ curl http://localhost:5000/v2/namespace/name/tags/list
 
 **Problem**: Smart contracts (WASM components) need to specify where to find an associated frontend (also a WASM component in an OCI registry).
 
-**Options to investigate**:
-- [ ] Use the `target` field in `config.blob` - what is this field actually for?
-- [ ] Use component metadata (via `wasm-metadata`)
-- [ ] Use OCI manifest annotations
-- [ ] Use the referrers API to link frontend as an "attached artifact"
+**Options investigated**:
 
-**Questions**:
-- What is the `target` field in `WasmConfig.component`? Is it meant for this use case?
-- Should the association be bidirectional (contract → frontend, frontend → contract)?
+#### Option A: The `target` field in WasmConfig.component
+
+- [x] **Investigated** - NOT suitable for this use case
+
+**Findings**: The `target` field exists in the `Component` struct (in `rust-oci-wasm/src/component.rs`):
+```rust
+pub struct Component {
+    pub exports: Vec<String>,
+    pub imports: Vec<String>,
+    pub target: Option<String>,  // "optional metadata for indexing"
+}
+```
+
+The field is documented as "optional metadata for indexing. Implementations MAY use this information to fetch other data to inspect the specified world." It's intended for referencing the WIT world/interface the component targets, not for frontend association. Currently always set to `None` in all code paths.
+
+**Verdict**: ❌ Not designed for frontend linking. Should not be repurposed.
+
+---
+
+#### Option B: Component metadata via wasm-metadata
+
+- [x] **Investigated** - Possible but not ideal
+
+**Findings**: The `wasm-metadata` crate (v0.240) supports these standard fields:
+- `name`, `version`, `authors`, `description`, `licenses`, `source`, `homepage`, `revision`, `processed_by`
+
+These are embedded directly in the WASM binary via `AddMetadata::to_wasm()`.
+
+**Advantages**:
+- Metadata travels with the WASM binary itself
+- Well-established tooling (`wkg wit build`, `wasm-metadata` crate)
+
+**Disadvantages**:
+- No custom key-value support in the standard API
+- Would require modifying the WASM binary for each update
+- Frontend references would be "baked in" at build time
+
+**Verdict**: ⚠️ Possible via `source` or `homepage` fields as a workaround, but not a clean solution.
+
+---
+
+#### Option C: OCI Manifest Annotations ✅ RECOMMENDED (Simple)
+
+- [x] **Investigated** - Well-suited for simple association
+
+**Findings**: OCI manifests support arbitrary key-value annotations. The codebase already uses them extensively:
+```rust
+// In wasm-pkg-client/src/oci/publisher.rs
+annotations.insert("org.opencontainers.image.version".to_string(), version);
+annotations.insert("org.opencontainers.image.description".to_string(), desc);
+```
+
+**Implementation approach**:
+```rust
+// Define custom annotation keys (use reverse domain notation)
+pub const VIBE_FRONTEND_URL: &str = "io.vibe.wasm.frontend.url";
+pub const VIBE_FRONTEND_DIGEST: &str = "io.vibe.wasm.frontend.digest";
+
+// Add to manifest annotations
+annotations.insert(
+    VIBE_FRONTEND_URL.to_string(),
+    "registry.example.com/org/frontend:1.0.0".to_string(),
+);
+annotations.insert(
+    VIBE_FRONTEND_DIGEST.to_string(),
+    "sha256:abc123...".to_string(),
+);
+```
+
+**Resulting manifest**:
+```json
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "annotations": {
+    "io.vibe.wasm.frontend.url": "registry.example.com/org/frontend:1.0.0",
+    "io.vibe.wasm.frontend.digest": "sha256:abc123..."
+  },
+  ...
+}
+```
+
+**Advantages**:
+- Simple to implement (already have annotation support)
+- Standard OCI pattern (follows spec conventions)
+- No registry changes needed
+- Works with existing tooling (`oras manifest fetch`)
+
+**Disadvantages**:
+- One-directional only (contract → frontend)
+- No querying capability (can't ask "what frontends exist for this contract?")
+
+**Verdict**: ✅ Best option for simple, immediate implementation.
+
+---
+
+#### Option D: OCI Referrers API ✅ RECOMMENDED (Advanced)
+
+- [x] **Investigated** - Best for bidirectional relationships
+
+**Findings**: The Referrers API (distribution-spec 1.1) allows manifests to declare a `subject` field pointing to another manifest. This creates a queryable relationship graph.
+
+**How it works**:
+
+1. **Smart Contract Manifest** pushed first → gets digest `sha256:contract123...`
+
+2. **Frontend Manifest** pushed with `subject` pointing to contract:
+```json
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "artifactType": "application/vnd.vibe.frontend.v1",
+  "subject": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:contract123...",
+    "size": 1234
+  },
+  "annotations": {
+    "io.vibe.frontend.framework": "React",
+    "io.vibe.frontend.compatible-versions": ">=1.0.0 <2.0.0"
+  },
+  "layers": [...]
+}
+```
+
+3. **Query frontends for a contract**:
+```
+GET /v2/org/project/referrers/sha256:contract123?artifactType=application/vnd.vibe.frontend.v1
+```
+
+Returns an image index listing all frontends that reference this contract.
+
+**Advantages**:
+- Bidirectional: Find contract→frontends OR inspect frontend→contract
+- Queryable at registry level
+- Supports filtering by `artifactType`
+- Rich metadata via annotations
+- OCI-standardized (not a custom extension)
+- Multiple frontends can reference one contract
+- Version compatibility tracking via annotations
+
+**Disadvantages**:
+- Requires implementing `end-12a` endpoint in our registry (currently marked "Not Implemented")
+- More complex than simple annotations
+- Requires registry support (fallback to tag-based schema if 404)
+
+**Verdict**: ✅ Best option for production-grade relationship tracking.
+
+---
+
+### Additional Complexities Discovered
+
+The initial analysis assumed a simpler model. Real-world requirements introduce these complications:
+
+#### Complexity 1: Multiple Independent Frontends
+
+Different developers may create different frontends for the same smart contract (e.g., a "power user" UI vs a "simple" UI, or competing implementations). This means:
+
+- **Contract → Frontend** association cannot be 1:1
+- The contract author may not control (or even know about) all frontends
+- Users need a way to discover available frontends for a contract
+
+**Implication**: The association direction matters. Frontends should point TO contracts, not vice versa.
+
+#### Complexity 2: Canonical Frontend with Updateability
+
+A dApp author may want to designate a "canonical" or "official" frontend, but:
+
+- Frontends need to be updatable without redeploying the contract (which may be immutable on-chain)
+- This requires a **mutable pointer** that can be updated by an authorized party
+- The pointer must be **signed** to prove the contract author endorses it
+
+**Implication**: Requires signing infrastructure (see 9.4). The "canonical frontend" designation is essentially a signed statement by the contract author, not baked into the contract itself.
+
+#### Complexity 3: Asymmetric Registry Architecture
+
+**Critical insight**: Frontends and contracts live in fundamentally different registries:
+
+| | Smart Contracts | Frontends |
+|---|---|---|
+| **Registry** | Blockchain nodes (our custom registry) | Traditional OCI registries (ghcr.io, etc.) |
+| **URL stability** | ❌ No canonical URL - every fullnode is its own registry | ✅ Stable URLs (ghcr.io/org/frontend:1.0.0) |
+| **Addressing** | Must be node-independent (e.g., by content hash or on-chain identifier) | Standard OCI references |
+| **Push capability** | ❌ Read-only (content comes from blockchain) | ✅ Normal push/pull |
+
+This asymmetry breaks several assumptions:
+
+1. **Referrers API won't work** for frontend→contract links:
+   - Referrers API requires both artifacts in the SAME registry
+   - Frontend on ghcr.io cannot use `subject` to reference a contract on a blockchain node
+   - Even if it could, there's no stable URL to put in the `subject.digest` reference
+
+2. **Contract→Frontend annotations work** (one direction):
+   - Contract manifest can include `io.vibe.wasm.frontend.url: "ghcr.io/org/frontend:1.0.0"`
+   - But this is baked in at contract publish time and not updatable
+
+3. **Frontend→Contract references need a different approach**:
+   - Cannot use OCI `subject` field (cross-registry)
+   - Must use **annotations with a custom addressing scheme**
+
+---
+
+### Revised Architecture
+
+Given these complexities, the association model needs to be:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        FRONTEND (on ghcr.io)                            │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ Manifest annotations:                                            │   │
+│  │   io.vibe.contract.chain: "vibe-mainnet"                        │   │
+│  │   io.vibe.contract.address: "0x1234..."                         │   │
+│  │   io.vibe.contract.digest: "sha256:abc..."  (content hash)      │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ References (node-independent addressing)
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   SMART CONTRACT (on any blockchain node)               │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ On-chain data / component metadata:                              │   │
+│  │   - Contract code (immutable)                                    │   │
+│  │   - Content digest (for verification)                            │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ Canonical Frontend Pointer (SEPARATE, SIGNED, MUTABLE):          │   │
+│  │   Stored: on-chain or in a signed attestation                    │   │
+│  │   io.vibe.canonical-frontend.url: "ghcr.io/author/ui:2.0.0"     │   │
+│  │   io.vibe.canonical-frontend.digest: "sha256:def456..."         │   │
+│  │   Signed by: <contract-author-pubkey>                            │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Revised Recommendation
+
+#### Direction 1: Frontend → Contract (Discovery: "What contract does this frontend use?")
+
+**Use: OCI Manifest Annotations with node-independent addressing**
+
+```json
+{
+  "annotations": {
+    "io.vibe.contract.chain": "vibe-mainnet",
+    "io.vibe.contract.address": "0x1234abcd...",
+    "io.vibe.contract.digest": "sha256:abc123..."
+  }
+}
+```
+
+- Frontend authors add these annotations when publishing to ghcr.io
+- Any OCI client can read them (`oras manifest fetch`)
+- Node-independent: client resolves the contract through any available node
+
+#### Direction 2: Contract → Canonical Frontend (Discovery: "What's the official frontend?")
+
+**Use: Signed attestation (requires 9.4 signing infrastructure)**
+
+This CANNOT be in the contract's OCI manifest because:
+- Contract manifests are generated from immutable on-chain data
+- Frontend URL needs to be updatable
+
+Options (pending 9.4 investigation):
+1. **On-chain storage**: Contract has an updateable "frontend pointer" field
+2. **Signed attestation**: A separate signed document (e.g., using Sigstore/cosign) that declares the canonical frontend
+3. **DNS-like resolution**: `_frontend.contractname.vibe` TXT record (decentralized DNS?)
+
+**Recommendation**: Defer to 9.4. The canonical frontend pointer is fundamentally a signing/identity problem, not an OCI problem.
+
+#### Direction 3: Discover all frontends for a contract
+
+**Challenge**: No registry-level query is possible across ghcr.io
+
+Options:
+1. **Off-chain index**: A service that crawls OCI registries for `io.vibe.contract.*` annotations
+2. **On-chain registration**: Frontends register themselves on-chain (requires tx)
+3. **Social discovery**: Frontend authors announce via other channels
+
+**Recommendation**: Out of scope for the OCI registry itself. This is an indexing/discovery service problem.
+
+---
+
+### Summary of What Works
+
+| Use Case | Solution | Status |
+|----------|----------|--------|
+| Frontend declares which contract it's for | Manifest annotations with chain/address/digest | ✅ Works now |
+| Contract declares canonical frontend | Signed attestation (needs signing infra) | ⏳ Blocked on 9.4 |
+| Discover all frontends for a contract | External indexing service | 🔮 Future work |
+| Verify frontend is "official" | Check signature matches contract author | ⏳ Blocked on 9.4 |
 
 ### 9.4 Component Signing & Identity
 
