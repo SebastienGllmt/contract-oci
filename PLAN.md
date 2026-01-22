@@ -1,13 +1,15 @@
-# WASM Component OCI Registry - Proof of Concept
+# WASM Component OCI Registry
 
 ## Overview
 
-Build a **Rust CLI tool** that demonstrates serving WASM components via OCI registry protocol. The tool will:
+A **Rust CLI tool** that demonstrates serving WASM components via OCI registry protocol. The tool will:
 1. Take `.wasm` component files as input
 2. Generate OCI artifacts (manifest, config) on-demand
 3. Serve via minimal HTTP server for testing with `oras pull`
 
-This PoC validates the architecture pattern that could be used for a real server implementation.
+This leverages [v1.1](https://opencontainers.org/posts/blog/2024-03-13-image-and-distribution-1-1/) of the OCI Image and Distribution specifications. Notably, it leverages the [OCI Artifact](https://oras.land/docs/concepts/artifact/) base to support the [Wasm OCI Artifact Layout](https://tag-runtime.cncf.io/wgs/wasm/deliverables/wasm-oci-artifact/).
+
+It is a content-addressed registry, meaning it's primarily designed for immutable storage and retrieval of artifacts (and not named repositories).
 
 ## Architecture Approach
 
